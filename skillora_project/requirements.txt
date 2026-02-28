@@ -1,0 +1,10 @@
+sqlalchemy
+alembic
+psycopg2-binary
+python-dotenv
+curl_cffi
+apscheduler
+cloudscraper
+fastapi
+uvicorn[standard]
+pydantic
