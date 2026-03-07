@@ -29,6 +29,7 @@ def get_courses(
     max_rating: Optional[float] = None,
     tag: Optional[str] = None,
     author: Optional[str] = None,
+    platform: Optional[str] = None,
     # advanced filters
     min_reviews: Optional[int] = None,
     min_subscribers: Optional[int] = None,
@@ -73,6 +74,9 @@ def get_courses(
 
     if author:
         q = q.join(Course.authors).filter(Author.name.ilike(f"%{author}%"))
+    
+    if platform:
+        q = q.join(Course.platform).filter(Platform.name.ilike(f"%{platform}%"))
 
     # --- Full-text search (title + description) ---
     if search:
