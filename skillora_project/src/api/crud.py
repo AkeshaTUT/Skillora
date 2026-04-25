@@ -8,9 +8,9 @@ import math
 from typing import Optional
 
 from sqlalchemy import func, or_
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 
-from src.models import Author, Course, Platform, Tag, course_tags
+from src.models import Author, Course, Platform, Tag
 
 
 # ---------------------------------------------------------------------------
@@ -44,11 +44,7 @@ def get_courses(
 
     Supports filtering, sorting and full-text search.
     """
-    q = db.query(Course).options(
-        joinedload(Course.tags),
-        joinedload(Course.authors),
-        joinedload(Course.platform),
-    )
+    q = db.query(Course)
 
     # --- Filters ---
     if level:
@@ -91,8 +87,7 @@ def get_courses(
 
     # --- Count (before pagination) ---
     # Use a subquery for count to avoid issues with joinedload
-    count_q = q.with_entities(Course.id).distinct()
-    total = count_q.count()
+    total = q.with_entities(Course.id).distinct().count()
 
     # --- Sorting ---
     sort_column = {
@@ -111,17 +106,17 @@ def get_courses(
 
     # --- Pagination ---
     offset = (page - 1) * page_size
-    courses = q.offset(offset).limit(page_size).all()
-
-    # De-duplicate (joinedload can cause dupes)
-    seen = set()
-    unique: list[Course] = []
-    for c in courses:
-        if c.id not in seen:
-            seen.add(c.id)
-            unique.append(c)
-
-    return unique, total
+    courses = (
+        q.options(
+            selectinload(Course.tags),
+            selectinload(Course.authors),
+            joinedload(Course.platform),
+        )
+        .offset(offset)
+        .limit(page_size)
+        .all()
+    )
+    return courses, total
 
 
 def get_course_by_id(db: Session, course_id: int) -> Course | None:

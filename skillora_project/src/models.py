@@ -1,6 +1,6 @@
 from sqlalchemy import (
     Boolean, Column, Integer, String, Float,
-    ForeignKey, Table, DateTime, Text,
+    ForeignKey, Table, DateTime, Text, Index,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -89,6 +89,12 @@ class Tag(Base):
 
 class Course(Base):
     __tablename__ = "courses"
+    __table_args__ = (
+        Index("ix_courses_level_paid", "level", "is_paid"),
+        Index("ix_courses_rating_reviews", "rating", "reviews_count"),
+        Index("ix_courses_subscribers", "subscribers_count"),
+        Index("ix_courses_title_clean", "title_clean"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     external_id = Column(Integer, index=True, comment="ID on the source platform")

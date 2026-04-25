@@ -38,3 +38,9 @@ skillora_project/data/
 
 # Logs
 *.log
+
+# Test coverage artifacts
+.coverage
+skillora_project/.coverage
+htmlcov/
+skillora_project/htmlcov/

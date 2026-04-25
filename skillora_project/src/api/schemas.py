@@ -112,3 +112,16 @@ class StatsOut(BaseModel):
     total_platforms: int
     avg_rating: Optional[float] = None
     levels: dict[str, int] = {}
+
+
+# ---------------------------------------------------------------------------
+# Auth
+# ---------------------------------------------------------------------------
+
+class TokenOut(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+
+
+class UserOut(BaseModel):
+    username: str

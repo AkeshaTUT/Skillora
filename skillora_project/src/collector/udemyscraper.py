@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import html
 import json
 import logging
 import os
@@ -101,6 +102,8 @@ MAX_RETRIES = 3
 RETRY_BACKOFF = 2          # seconds; doubles on each retry
 MIN_DELAY = 1.5            # random delay range between pages (seconds)
 MAX_DELAY = 4.0
+SITEMAP_MIN_DELAY = 0.3
+SITEMAP_MAX_DELAY = 1.0
 
 # Proxy (optional, set via env var SCRAPER_PROXY, e.g. "http://user:pass@host:port")
 PROXY = os.getenv("SCRAPER_PROXY", "")
@@ -139,6 +142,86 @@ def _extract_embedded_json(html: str) -> dict[str, Any] | None:
                 return pp
         except (json.JSONDecodeError, AttributeError):
             continue
+    return None
+
+
+def _extract_xml_locs(xml_text: str) -> list[str]:
+    return re.findall(r"<loc>(.*?)</loc>", xml_text)
+
+
+def _extract_course_ld_json(page_html: str, fallback_url: str) -> dict[str, Any] | None:
+    """Parse JSON-LD Course metadata from a Udemy course page."""
+    blocks = re.findall(
+        r"<script[^>]*type=['\"]application/ld\+json['\"][^>]*>(.*?)</script>",
+        page_html,
+        re.DOTALL | re.IGNORECASE,
+    )
+
+    for block in blocks:
+        raw = html.unescape(block.strip())
+        if not raw:
+            continue
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+
+        candidates: list[dict] = []
+        if isinstance(payload, list):
+            candidates.extend([x for x in payload if isinstance(x, dict)])
+        elif isinstance(payload, dict):
+            candidates.append(payload)
+            graph = payload.get("@graph")
+            if isinstance(graph, list):
+                candidates.extend([x for x in graph if isinstance(x, dict)])
+
+        for item in candidates:
+            if str(item.get("@type", "")).lower() != "course":
+                continue
+
+            authors = item.get("author") or []
+            if isinstance(authors, dict):
+                authors = [authors]
+            instructor = None
+            if authors:
+                first = authors[0]
+                if isinstance(first, dict):
+                    instructor = first.get("name")
+                elif isinstance(first, str):
+                    instructor = first
+
+            agg = item.get("aggregateRating") or {}
+            offers = item.get("offers") or {}
+            if isinstance(offers, list):
+                offers = offers[0] if offers else {}
+
+            price_raw = offers.get("price")
+            is_paid = True
+            if price_raw is not None:
+                try:
+                    is_paid = float(price_raw) > 0
+                except (TypeError, ValueError):
+                    is_paid = True
+
+            return {
+                "id": None,
+                "title": item.get("name") or "",
+                "url": item.get("url") or item.get("@id") or fallback_url,
+                "headline": item.get("description") or "",
+                "instructor": instructor,
+                "rating": agg.get("ratingValue"),
+                "num_reviews": agg.get("ratingCount") or agg.get("reviewCount"),
+                "num_subscribers": None,
+                "num_lectures": None,
+                "content_length": None,
+                "level": None,
+                "is_paid": is_paid,
+                "last_update": None,
+                "published_time": None,
+                "image": item.get("image") if isinstance(item.get("image"), str) else None,
+                "topic": "all-catalog",
+            }
+
     return None
 
 
@@ -323,6 +406,163 @@ def scrape_udemy_topics(
     return all_courses
 
 
+def scrape_udemy_query(query: str, *, max_topics: int = 4, limit: int = 50) -> list[dict]:
+    """
+    Query-oriented Udemy search based on topic pages.
+
+    Why topics: Udemy blocks direct anonymous access to search/course APIs,
+    while topic pages contain embedded course JSON that is accessible.
+    """
+    q = (query or "").strip().lower()
+    if not q:
+        return []
+
+    matched_topics: list[str] = []
+    for topic in TOPICS:
+        topic_h = topic.replace("-", " ")
+        if q in topic_h or topic_h in q:
+            matched_topics.append(topic)
+
+    # Short aliases and frequent tech keywords -> topic mapping.
+    synonyms = {
+        "js": "javascript",
+        "ml": "machine-learning",
+        "ai": "machine-learning",
+        "data": "data-science",
+        "analytics": "data-science",
+        "backend": "web-development",
+        "frontend": "web-development",
+        "fullstack": "web-development",
+        "react": "react",
+        "python": "python",
+        "java": "java",
+        "docker": "docker",
+        "devops": "devops",
+        "cloud": "aws-certification",
+        "k8s": "kubernetes",
+        "csharp": "c-sharp",
+        "node": "node-js",
+        "golang": "go-programming-language",
+        "cybersecurity": "cyber-security",
+    }
+    if not matched_topics:
+        tokens = [t for t in re.split(r"[^\w+-]+", q) if t]
+        for token in tokens:
+            topic = synonyms.get(token)
+            if topic and topic in TOPICS and topic not in matched_topics:
+                matched_topics.append(topic)
+
+    if not matched_topics:
+        logger.info(f"Query mode: '{query}' -> no relevant topics found")
+        return []
+
+    matched_topics = matched_topics[:max_topics]
+    logger.info(
+        f"Query mode: '{query}' -> topics {matched_topics} (max_topics={max_topics})"
+    )
+
+    courses = scrape_udemy_topics(matched_topics)
+    ranked: list[tuple[int, dict]] = []
+    for c in courses:
+        title = (c.get("title") or "").lower()
+        headline = (c.get("headline") or "").lower()
+        score = 0
+        if q in title:
+            score += 4
+        if q in headline:
+            score += 2
+        for token in q.split():
+            if token in title:
+                score += 1
+            if token in headline:
+                score += 1
+        ranked.append((score, c))
+
+    ranked.sort(key=lambda x: (x[0], x[1].get("rating") or 0), reverse=True)
+    return [c for score, c in ranked if score > 0][:limit]
+
+
+def scrape_udemy_all_from_sitemap(
+    *,
+    sitemap_pages: int = 0,
+    max_courses: int = 0,
+) -> list[dict]:
+    """
+    Crawl Udemy course sitemap and parse individual course pages.
+
+    Args:
+        sitemap_pages: number of course sitemap pages to process (0 = all pages)
+        max_courses: max number of course URLs to fetch (0 = unlimited)
+    """
+    session = _build_session()
+
+    index_resp = _fetch_with_retry(session, f"{BASE_URL}/sitemap.xml")
+    if not index_resp:
+        logger.error("Cannot fetch Udemy sitemap index")
+        return []
+
+    all_locs = _extract_xml_locs(index_resp.text)
+    course_sitemaps = [u for u in all_locs if "/sitemap/courses.xml" in u]
+    if not course_sitemaps:
+        logger.error("No course sitemap entries found")
+        return []
+
+    if sitemap_pages > 0:
+        course_sitemaps = course_sitemaps[:sitemap_pages]
+
+    logger.info(
+        f"Sitemap mode: {len(course_sitemaps)} sitemap pages selected "
+        f"(max_courses={max_courses or 'all'})"
+    )
+
+    course_urls: list[str] = []
+    seen_urls: set[str] = set()
+
+    for i, sitemap_url in enumerate(course_sitemaps, 1):
+        logger.info(f"[sitemap {i}/{len(course_sitemaps)}] {sitemap_url}")
+        sm_resp = _fetch_with_retry(session, sitemap_url)
+        if not sm_resp:
+            continue
+
+        locs = _extract_xml_locs(sm_resp.text)
+        for url in locs:
+            if "/course/" not in url:
+                continue
+            if url in seen_urls:
+                continue
+            seen_urls.add(url)
+            course_urls.append(url)
+            if max_courses > 0 and len(course_urls) >= max_courses:
+                break
+
+        logger.info(f"  collected URLs so far: {len(course_urls)}")
+        if max_courses > 0 and len(course_urls) >= max_courses:
+            break
+
+        time.sleep(random.uniform(SITEMAP_MIN_DELAY, SITEMAP_MAX_DELAY))
+
+    logger.info(f"Course URL pool ready: {len(course_urls)}")
+
+    parsed: list[dict] = []
+    for idx, url in enumerate(course_urls, 1):
+        if idx % 50 == 0 or idx == 1:
+            logger.info(f"[course {idx}/{len(course_urls)}] {url}")
+
+        page_resp = _fetch_with_retry(session, url)
+        if not page_resp:
+            continue
+
+        data = _extract_course_ld_json(page_resp.text, url)
+        if data:
+            parsed.append(data)
+
+        if idx < len(course_urls):
+            time.sleep(random.uniform(SITEMAP_MIN_DELAY, SITEMAP_MAX_DELAY))
+
+    logger.info(f"Sitemap crawl complete: {len(parsed)} parsed out of {len(course_urls)} URLs")
+    return parsed
+
+
 # ---------------------------------------------------------------------------
 # Database persistence
 # ---------------------------------------------------------------------------
@@ -495,12 +735,43 @@ def main() -> None:
         action="store_true",
         help="Save to CSV only (skip DB)",
     )
+    parser.add_argument(
+        "--query",
+        type=str,
+        default="",
+        help="Search-style mode: scrape topics relevant to this query",
+    )
+    parser.add_argument(
+        "--all-from-sitemap",
+        action="store_true",
+        help="Mass crawl from Udemy course sitemaps",
+    )
+    parser.add_argument(
+        "--sitemap-pages",
+        type=int,
+        default=0,
+        help="How many course sitemap pages to process (0 = all)",
+    )
+    parser.add_argument(
+        "--max-courses",
+        type=int,
+        default=0,
+        help="Maximum number of course pages to fetch (0 = all)",
+    )
     args = parser.parse_args()
 
     if args.schedule:
         run_scheduler()
     else:
-        courses = scrape_udemy_topics()
+        if args.all_from_sitemap:
+            courses = scrape_udemy_all_from_sitemap(
+                sitemap_pages=args.sitemap_pages,
+                max_courses=args.max_courses,
+            )
+        elif args.query:
+            courses = scrape_udemy_query(args.query)
+        else:
+            courses = scrape_udemy_topics()
 
         if not args.csv_only:
             save_to_db(courses)

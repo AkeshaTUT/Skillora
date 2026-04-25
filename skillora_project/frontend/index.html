@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Skillora — агрегатор онлайн-курсов Udemy и Coursera. Поиск, фильтрация и рекомендации." />
+  <title>Skillora — Агрегатор курсов</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/ui/style.css" />
+</head>
+<body>
+  <div class="bg-grid" aria-hidden="true"></div>
+  <main class="app-shell">
+    <header class="hero">
+      <div class="logo-row">
+        <div class="logo-icon">S</div>
+        <p class="eyebrow">Skillora Platform</p>
+      </div>
+      <h1>Найди свой идеальный курс</h1>
+      <p class="subtitle">Ищите среди тысяч курсов Udemy и Coursera — мгновенные результаты из нашей базы.</p>
+    </header>
+
+    <section class="search-panel" id="search-panel">
+      <div class="search-row">
+        <div class="search-input-wrap">
+          <svg class="search-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+          <input id="query" type="text" placeholder="Python, React, Data Science, Machine Learning..." autocomplete="off" />
+        </div>
+        <select id="source">
+          <option value="all">Все платформы</option>
+          <option value="udemy">Udemy</option>
+          <option value="coursera">Coursera</option>
+        </select>
+        <button id="searchBtn">
+          <span>Искать</span>
+        </button>
+      </div>
+      <div class="meta-row">
+        <span id="status">Готов к поиску</span>
+        <span id="db-badge" class="db-badge hidden">из базы данных</span>
+      </div>
+    </section>
+
+    <section>
+      <div id="results" class="cards"></div>
+    </section>
+  </main>
+
+  <script src="/ui/app.js"></script>
+</body>
+</html>

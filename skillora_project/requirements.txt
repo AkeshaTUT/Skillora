@@ -8,3 +8,12 @@ cloudscraper
 fastapi
 uvicorn[standard]
 pydantic
+python-jose[cryptography]
+passlib[bcrypt]
+python-multipart
+prometheus-fastapi-instrumentator
+redis
+pytest
+pytest-cov
+httpx
+ruff

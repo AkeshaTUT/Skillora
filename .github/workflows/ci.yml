@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: skillora_project
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Lint
+        run: python -m ruff check src tests
+
+      - name: Run tests with coverage
+        env:
+          SKILLORA_DATABASE_URL: sqlite:///./test_ci.db
+          SECRET_KEY: ci-secret
+          API_ADMIN_USERNAME: admin
+          API_ADMIN_PASSWORD: admin123
+        run: pytest -q --cov=src/api --cov=src/collector --cov-report=term-missing --cov-fail-under=40
+
+      - name: Build container
+        run: docker build -t skillora:ci .

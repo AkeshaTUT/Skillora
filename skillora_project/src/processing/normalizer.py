@@ -18,7 +18,6 @@ import os
 import re
 import sys
 import unicodedata
-from datetime import datetime, timezone
 
 # ---------------------------------------------------------------------------
 # Importable from project root
@@ -38,8 +37,6 @@ from src.models import (
     Platform,
     RawCourse,
     Tag,
-    course_authors,
-    course_tags,
 )
 
 logger = logging.getLogger("processing.normalizer")
@@ -319,7 +316,7 @@ def main() -> None:
 
     if args.stats:
         db = SessionLocal()
-        print(f"\n DB stats:")
+        print("\n DB stats:")
         print(f"   courses : {db.query(Course).count()}")
         print(f"   authors : {db.query(Author).count()}")
         print(f"   tags    : {db.query(Tag).count()}")
